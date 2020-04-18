@@ -215,19 +215,19 @@ namespace Tmds.Ssh
             static Packet CreatePacket(ChannelContext context)
             {
                 /*
-                    byte      SSH_MSG_CHANNEL_DATA
-                    uint32    recipient channel
-					uint32 	  length
-					byte 	  SSH_FXP_INIT
-					uint32 	  version
+                    byte        SSH_MSG_CHANNEL_DATA
+                    uint32      recipient channel
+                    uint32      length
+                    byte        SSH_FXP_INIT
+                    uint32      version
                 */
                 using var packet = context.RentPacket();
                 var writer = packet.GetWriter();
                 writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
                 writer.WriteUInt32(context.RemoteChannel);
-				writer.WriteUInt32(5); // length
-				writer.WriteByte((byte)SftpPacketTypes.SSH_FXP_INIT);
-				writer.WriteUInt32(3); // version
+                writer.WriteUInt32(5); // length
+                writer.WriteByte((byte)SftpPacketTypes.SSH_FXP_INIT);
+                writer.WriteUInt32(3); // version
                 return packet.Move();
             }
         }

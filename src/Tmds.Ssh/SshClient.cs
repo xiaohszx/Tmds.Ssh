@@ -677,7 +677,7 @@ namespace Tmds.Ssh
             _allocatedChannels[i] = _allocatedChannels[i] & ~mask;
         }
 
-		 public async Task<RemoteProcess> OpenSftpClientAsync(CancellationToken ct, string path) {
+		 public async Task<RemoteProcess> OpenSftpClientAsync(CancellationToken ct) {
 			ChannelContext context = CreateChannel();
 
             var options = new ExecuteCommandOptions();
