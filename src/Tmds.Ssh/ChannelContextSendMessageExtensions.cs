@@ -182,5 +182,54 @@ namespace Tmds.Ssh
                 return packet.Move();
             }
         }
+        
+        public static ValueTask StartSftpAsync(this ChannelContext context, CancellationToken ct)
+        {
+            return context.SendPacketAsync(CreatePacket(context), ct);
+
+            static Packet CreatePacket(ChannelContext context)
+            {
+                /*
+                    byte      SSH_MSG_CHANNEL_REQUEST
+                    uint32    recipient channel
+                    string    "subsystem"
+                    boolean   want reply
+                    string    "sftp
+                 */
+
+                using var packet = context.RentPacket();
+                var writer = packet.GetWriter();
+                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_REQUEST);
+                writer.WriteUInt32(context.RemoteChannel);
+                writer.WriteString("subsystem");
+                writer.WriteBoolean(true);
+                writer.WriteString("sftp");
+                return packet.Move();
+            }
+        }
+
+        public static ValueTask SftpInitMessageAsync(this ChannelContext context, CancellationToken ct)
+        {
+            return context.SendPacketAsync(CreatePacket(context), ct); // TODO later build sftp over SendChannelDataMessageAsync()
+
+            static Packet CreatePacket(ChannelContext context)
+            {
+                /*
+                    byte      SSH_MSG_CHANNEL_DATA
+                    uint32    recipient channel
+					uint32 	  length
+					byte 	  SSH_FXP_INIT
+					uint32 	  version
+                */
+                using var packet = context.RentPacket();
+                var writer = packet.GetWriter();
+                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
+                writer.WriteUInt32(context.RemoteChannel);
+				writer.WriteUInt32(5); // length
+				writer.WriteByte((byte)SftpPacketTypes.SSH_FXP_INIT);
+				writer.WriteUInt32(3); // version
+                return packet.Move();
+            }
+        }
     }
 }

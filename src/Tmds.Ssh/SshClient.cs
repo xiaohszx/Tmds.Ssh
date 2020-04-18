@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -45,7 +46,7 @@ namespace Tmds.Ssh
         {
             _abortCts = new CancellationTokenSource();
 
-            _settings = CreateSettingsForDetination(destination);
+            _settings = CreateSettingsForDetination(destination); // Isn't this a typo?
             if (configure == null)
             {
                 _settings.Credentials.Add(new IdentityFileCredential(IdentityFileCredential.RsaIdentityFile));
@@ -64,7 +65,7 @@ namespace Tmds.Ssh
             };
         }
 
-        private static SshClientSettings CreateSettingsForDetination(string destination)
+        private static SshClientSettings CreateSettingsForDetination(string destination) // Typo, TODO
         {
             if (destination == null)
             {
@@ -676,6 +677,40 @@ namespace Tmds.Ssh
             _allocatedChannels[i] = _allocatedChannels[i] & ~mask;
         }
 
+		 public async Task<RemoteProcess> OpenSftpClientAsync(CancellationToken ct, string path) {
+			ChannelContext context = CreateChannel();
+
+            var options = new ExecuteCommandOptions();
+
+            Encoding standardInputEncoding = options.StandardInputEncoding;
+            Encoding standardErrorEncoding = options.StandardErrorEncoding;
+            Encoding standardOutputEncoding = options.StandardOutputEncoding;
+            
+			RemoteProcess? remoteProcess = null;
+            try
+            {
+                // Open the session channel.
+                {
+                    await context.SendChannelOpenSessionMessageAsync(ct).ConfigureAwait(false);
+                    await context.ReceiveChannelOpenConfirmationAsync(ct).ConfigureAwait(false);
+                }
+                // Request command execution.
+                {
+                    await context.StartSftpAsync(ct).ConfigureAwait(false);
+                    await context.ReceiveChannelRequestSuccessAsync("Failed to start sftp.", ct).ConfigureAwait(false);
+                }
+                await context.SftpInitMessageAsync(ct);
+
+                remoteProcess = new RemoteProcess(context, standardInputEncoding, standardErrorEncoding, standardOutputEncoding);
+				return remoteProcess;
+
+            }
+            catch
+            {
+                context.Dispose();
+                throw;
+            }
+		 }
         private bool HasConnected =>
             _sendQueue != null;
     }
