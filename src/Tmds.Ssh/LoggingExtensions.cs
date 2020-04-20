@@ -22,6 +22,7 @@ namespace Tmds.Ssh
         private static readonly Action<ILogger, Exception?> _authSuccess;
         private static readonly Action<ILogger, Exception?> _authFailed;
         private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _received;
+        private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _receivedSftp;
         private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _send;
 
         static LoggingExtensions()
@@ -164,6 +165,10 @@ namespace Tmds.Ssh
         {
             _received(logger, packet.MessageId, new PacketPayload(packet), null);
         }
+        // public static void Received(this ILogger logger, ReadOnlySftpPacket packet)
+        // {
+        //     _receivedSftp(logger, packet.MessageId, new PacketPayload(packet), null);
+        // }
 
         public static void Send(this ILogger logger, ReadOnlyPacket packet)
         {
@@ -180,7 +185,7 @@ namespace Tmds.Ssh
 
             public override string ToString()
             {
-                const int maxDataLength = 2 * PrettyBytePrinter.BytesPerLine;
+                const int maxDataLength = 20 * PrettyBytePrinter.BytesPerLine;
 
                 ReadOnlySequence<byte> payload = _packet.Payload;
                 bool trimmed = false;

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using System.Buffers.Binary;
 using Tmds.Ssh;
 using System.Text;
@@ -12,6 +13,8 @@ namespace Tmds.Ssh
     {
         private ChannelContext _context;
         private readonly SftpSettings _settings;
+        private readonly Task _receiveLoopTask;
+        private readonly ILogger _logger;
         private int requestId;
         // IAsyncEnumerable<TResult> ListFilesAsync<TResult>(ReadOnlySpan<byte> directory, ListTransform<TResult> transform, ListPredicate? predicate = null);
         // ValueTask<SftpFile> OpenFileAsync(ReadOnlySpan<byte> path, SftpAccessFlags access, SftpOpenFlags openFlags, SetAttributes? setAttributes = null);
@@ -31,9 +34,11 @@ namespace Tmds.Ssh
             var names = await _context.SftpReceiveFilenameAsync("Filename receive failure", CancellationToken.None);
             return names;
         }
-        internal SftpClient(ChannelContext context, SftpSettings settings) {
+        internal SftpClient(ChannelContext context, SftpSettings settings, ILogger logger) {
             _context = context;
             _settings = settings;
+            _receiveLoopTask = ReceiveLoopAsync();
+            _logger = logger;
             requestId = 0;
             // Console.WriteLine($"SFTP Version: {settings.version}");
             // foreach (var extension in settings.extensions)
@@ -44,6 +49,41 @@ namespace Tmds.Ssh
         public void Dispose()
         {
             _context?.Dispose();
+        }
+
+        private async Task ReceiveLoopAsync()
+        {
+            try
+            {
+                MessageId messageId;
+                do
+                {
+                    using var packet = await _context.ReceivePacketAsync(ct: default).ConfigureAwait(false);
+                    // SshContext ReceivePacket should already handle failures and window adjustments
+                    messageId = packet.MessageId!.Value;
+
+                    if (messageId == MessageId.SSH_MSG_CHANNEL_DATA)
+                    {
+                        using SftpPacket sftpPacket = ParseSftpPacket(packet);
+                        _logger.ReceivedSftp(sftpPacket);
+                    }
+                    else
+                    {
+                        // Dunno
+                    }
+
+                } while (messageId != MessageId.SSH_MSG_CHANNEL_CLOSE);
+
+                // _readQueue.Writer.Complete();
+            }
+            catch (Exception e)
+            {
+                _readQueue.Writer.Complete(e);
+            }
+        }
+
+        private SftpPacket ParseSftpPacket(Packet packet){
+
         }
     }
     internal class SftpSettings {
