@@ -208,11 +208,11 @@ namespace Tmds.Ssh
             }
         }
 
-        public static ValueTask SftpInitMessageAsync(this ChannelContext context, CancellationToken ct)
+        public static ValueTask SftpInitMessageAsync(this ChannelContext context, uint version, CancellationToken ct)
         {
-            return context.SendPacketAsync(CreatePacket(context), ct); // TODO later build sftp over SendChannelDataMessageAsync()
+            return context.SendPacketAsync(CreatePacket(context, version), ct); // TODO later build sftp over SendChannelDataMessageAsync()
 
-            static Packet CreatePacket(ChannelContext context)
+            static Packet CreatePacket(ChannelContext context, uint version)
             {
                 /*
                     byte        SSH_MSG_CHANNEL_DATA
@@ -225,9 +225,68 @@ namespace Tmds.Ssh
                 var writer = packet.GetWriter();
                 writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
                 writer.WriteUInt32(context.RemoteChannel);
+                writer.WriteUInt32(9); // length
                 writer.WriteUInt32(5); // length
                 writer.WriteByte((byte)SftpPacketTypes.SSH_FXP_INIT);
-                writer.WriteUInt32(3); // version
+                writer.WriteUInt32(version); // version
+                return packet.Move();
+            }
+        }
+        public static ValueTask SftpOpenDirMessageAsync(this ChannelContext context, int requestId, string path, CancellationToken ct)
+        {
+            return context.SendPacketAsync(CreatePacket(context, requestId, path), ct);
+
+            static Packet CreatePacket(ChannelContext context, int requestId, string path)
+            {
+                /*
+                    byte      SSH_MSG_CHANNEL_DATA
+                    uint32    recipient channel
+                    uint32    data_length
+                    uint32    packet_length
+                    byte      
+                    uint32    requestId
+                    string    path
+                */
+                var stringLength = System.Text.ASCIIEncoding.ASCII.GetByteCount(path);
+
+                using var packet = context.RentPacket();
+                var writer = packet.GetWriter();
+                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
+                writer.WriteUInt32(context.RemoteChannel);
+                writer.WriteUInt32(1 + 4 + 4 + 4 + stringLength);
+                writer.WriteUInt32(1 + 4 + 4 + stringLength);
+                writer.WriteByte((byte)SftpPacketTypes.SSH_FXP_OPENDIR);
+                writer.WriteUInt32(requestId);
+                writer.WriteString(path);
+                return packet.Move();
+            }
+        }
+        public static ValueTask SftpReadDirMessageAsync(this ChannelContext context, int requestId, string handle, CancellationToken ct)
+        {
+            return context.SendPacketAsync(CreatePacket(context, requestId, handle), ct);
+
+            static Packet CreatePacket(ChannelContext context, int requestId, string handle)
+            {
+                /*
+                    byte      SSH_MSG_CHANNEL_DATA
+                    uint32    recipient channel
+                    uint32    data_length
+                    uint32    packet_length
+                    byte      
+                    uint32    requestId
+                    string    handle
+                */
+                var stringLength = System.Text.ASCIIEncoding.ASCII.GetByteCount(handle);
+
+                using var packet = context.RentPacket();
+                var writer = packet.GetWriter();
+                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
+                writer.WriteUInt32(context.RemoteChannel);
+                writer.WriteUInt32(1 + 4 + 4 + 4 + stringLength);
+                writer.WriteUInt32(1 + 4 + 4 + stringLength);
+                writer.WriteByte((byte)SftpPacketTypes.SSH_FXP_READDIR);
+                writer.WriteUInt32(requestId);
+                writer.WriteString(handle);
                 return packet.Move();
             }
         }

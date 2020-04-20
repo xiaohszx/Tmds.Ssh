@@ -677,16 +677,10 @@ namespace Tmds.Ssh
             _allocatedChannels[i] = _allocatedChannels[i] & ~mask;
         }
 
-		 public async Task<RemoteProcess> OpenSftpClientAsync(CancellationToken ct) {
-			ChannelContext context = CreateChannel();
-
-            var options = new ExecuteCommandOptions();
-
-            Encoding standardInputEncoding = options.StandardInputEncoding;
-            Encoding standardErrorEncoding = options.StandardErrorEncoding;
-            Encoding standardOutputEncoding = options.StandardOutputEncoding;
-            
-			RemoteProcess? remoteProcess = null;
+         public async Task<SftpClient> OpenSftpClientAsync(CancellationToken ct) {
+            ChannelContext context = CreateChannel();
+            SftpSettings settings;
+            uint sftpVersion = 3;
             try
             {
                 // Open the session channel.
@@ -699,18 +693,20 @@ namespace Tmds.Ssh
                     await context.StartSftpAsync(ct).ConfigureAwait(false);
                     await context.ReceiveChannelRequestSuccessAsync("Failed to start sftp.", ct).ConfigureAwait(false);
                 }
-                await context.SftpInitMessageAsync(ct);
-
-                remoteProcess = new RemoteProcess(context, standardInputEncoding, standardErrorEncoding, standardOutputEncoding);
-				return remoteProcess;
-
+                // Initiate SFTP session and agree on a version
+                {
+                    await context.SftpInitMessageAsync(sftpVersion, ct);
+                    settings =  await context.ReceiveSftpSettingsAsync("Failed to negotiate SFTP", ct);
+                }
+                
+                return new SftpClient(context, settings);
             }
             catch
             {
-                context.Dispose();
+                context.Dispose(); // closing channel
                 throw;
             }
-		 }
+         }
         private bool HasConnected =>
             _sendQueue != null;
     }
