@@ -52,6 +52,11 @@ namespace Tmds.Ssh.TestApp
 
                 Console.WriteLine("Process exited with exit code " + remoteProcess.ExitCode);
             }
+            else if (command == "sftp")
+            {
+                var sftpClient = await client.OpenSftpClientAsync(default);
+                byte[] handle = await sftpClient.OpenDirAsync("/");
+            }
             else
             {
                 throw new ArgumentException(nameof(command));

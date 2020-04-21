@@ -101,7 +101,7 @@ namespace Tmds.Ssh
                             ThrowHelper.ThrowProtocolInvalidPacketLength();
 
                         var sftpPacketLength = reader.ReadUInt32();
-                        var type = (PacketId)reader.ReadByte();
+                        var type = (SftpPacketType)reader.ReadByte();
                         var version = reader.ReadUInt32();
 
                         var extensions = new List<Tuple<string, string>>();
@@ -151,7 +151,7 @@ namespace Tmds.Ssh
                             ThrowHelper.ThrowProtocolInvalidPacketLength();
 
                         var sftpPacketLength = reader.ReadUInt32();
-                        var type = (PacketId)reader.ReadByte();
+                        var type = (SftpPacketType)reader.ReadByte();
                         var requestId = reader.ReadUInt32();
                         var handle = reader.ReadUtf8String();
                         return handle;
@@ -192,7 +192,7 @@ namespace Tmds.Ssh
                             ThrowHelper.ThrowProtocolInvalidPacketLength();
 
                         var sftpPacketLength = reader.ReadUInt32();
-                        var type = (PacketId)reader.ReadByte();
+                        var type = (SftpPacketType)reader.ReadByte();
                         var requestId = reader.ReadUInt32();
                         var count = reader.ReadUInt32();
                         var fileNames = new List<string>();

@@ -3,7 +3,7 @@
 
 namespace Tmds.Ssh
 {
-    public enum PacketId
+    public enum SftpPacketType
     {
         SSH_FXP_INIT = 1,
         SSH_FXP_VERSION = 2,

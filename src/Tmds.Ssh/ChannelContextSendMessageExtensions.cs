@@ -227,7 +227,7 @@ namespace Tmds.Ssh
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(9); // length
                 writer.WriteUInt32(5); // length
-                writer.WriteByte((byte)PacketId.SSH_FXP_INIT);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_INIT);
                 writer.WriteUInt32(version); // version
                 return packet.Move();
             }
@@ -255,7 +255,7 @@ namespace Tmds.Ssh
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(1 + 4 + 4 + 4 + stringLength);
                 writer.WriteUInt32(1 + 4 + 4 + stringLength);
-                writer.WriteByte((byte)PacketId.SSH_FXP_OPENDIR);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_OPENDIR);
                 writer.WriteUInt32(requestId);
                 writer.WriteString(path);
                 return packet.Move();
@@ -284,7 +284,7 @@ namespace Tmds.Ssh
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(1 + 4 + 4 + 4 + stringLength);
                 writer.WriteUInt32(1 + 4 + 4 + stringLength);
-                writer.WriteByte((byte)PacketId.SSH_FXP_READDIR);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_READDIR);
                 writer.WriteUInt32(requestId);
                 writer.WriteString(handle);
                 return packet.Move();

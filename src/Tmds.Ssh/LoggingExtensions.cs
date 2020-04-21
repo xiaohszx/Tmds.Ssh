@@ -23,7 +23,7 @@ namespace Tmds.Ssh
         private static readonly Action<ILogger, Exception?> _authFailed;
         private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _received;
         private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _send;
-        private static readonly Action<ILogger, PacketId, SftpPacketPayload, Exception?> _receivedSftp;
+        private static readonly Action<ILogger, SftpPacketType, SftpPacketPayload, Exception?> _receivedSftp;
 
         static LoggingExtensions()
         {
@@ -105,7 +105,7 @@ namespace Tmds.Ssh
                 formatString: "Sending {messageId} {payload}"
             );
 
-            _receivedSftp = LoggerMessage.Define<PacketId, SftpPacketPayload>(
+            _receivedSftp = LoggerMessage.Define<SftpPacketType, SftpPacketPayload>(
                 eventId: 13,
                 logLevel: LogLevel.Debug,
                 formatString: "Received {packetId} {payload}"

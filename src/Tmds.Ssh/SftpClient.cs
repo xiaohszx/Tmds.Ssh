@@ -7,28 +7,81 @@ using System.Buffers.Binary;
 using Tmds.Ssh;
 using System.Text;
 using System.IO;
+using System.Collections.Concurrent;
+using System.Buffers;
+
 namespace Tmds.Ssh
 {
+    abstract class SftpOperation
+    {
+        public abstract void HandleResponse(ReadOnlySequence<byte> response);
+    }
+
+    class SftpFile
+    {
+        private SftpFile(byte[] handle) { }
+    }
+
+    class OpenDirOperation : SftpOperation
+    {
+        private TaskCompletionSource<byte[]> _tcs = new TaskCompletionSource<byte[]>();
+
+        public override void HandleResponse(ReadOnlySequence<byte> response)
+        {
+            /*
+                   byte   SSH_FXP_HANDLE
+            uint32 request-id
+            string handle
+            */
+
+            var reader = new SequenceReader(response);
+            byte type = reader.ReadByte();
+            reader.SkipUInt32();
+            byte[] handle = reader.ReadStringAsBytes().ToArray();
+            _tcs.SetResult(handle);
+        }
+
+        public Task<byte[]> Task => _tcs.Task;
+    }
+
     public class SftpClient : IDisposable
     {
         private ChannelContext _context;
         private readonly SftpSettings _settings;
         private readonly Task _receiveLoopTask;
         private readonly ILogger _logger;
-        private int requestId;
-        public async ValueTask ListFilesAsync(string directory)
+        private int _requestId;
+        private ConcurrentDictionary<int, SftpOperation> _operations;
+
+        private int GetNextRequestId()
         {
-            // SSH_FXP_READDIR until SSH_FXP_STATUS if error or SSH_FX_EOF to read all file names, then close the handle 
-            await _context.SftpOpenDirMessageAsync(requestId++, directory, CancellationToken.None);
-            await _context.SftpReadDirMessageAsync(requestId++, "\x00\x00\x00\x00", CancellationToken.None);
+            return Interlocked.Increment(ref _requestId);
         }
+
+        // ValueTask<SftpFile> OpenFileAsync(ReadOnlySpan<byte> path, SftpAccessFlags access, SftpOpenFlags openFlags, SetAttributes? setAttributes = null);
+        public async Task<byte[]> OpenDirAsync(string directory)
+        {
+            int requestId = GetNextRequestId();
+
+            var operation = new OpenDirOperation();
+
+            _operations.TryAdd(requestId, operation);
+
+            // SSH_FXP_READDIR until SSH_FXP_STATUS if error or SSH_FX_EOF to read all file names, then close the handle 
+            await _context.SftpOpenDirMessageAsync(requestId, directory, CancellationToken.None);
+            // await _context.SftpReadDirMessageAsync(requestId++, "\x00\x00\x00\x00", CancellationToken.None);
+
+            return await operation.Task;
+        }
+
         internal SftpClient(ChannelContext context, SftpSettings settings, ILogger logger)
         {
             _context = context;
             _settings = settings;
             _receiveLoopTask = ReceiveLoopAsync();
             _logger = logger;
-            requestId = 0;
+            _requestId = 0;
+            _operations = new ConcurrentDictionary<int, SftpOperation>();
         }
         public void Dispose()
         {
@@ -48,8 +101,11 @@ namespace Tmds.Ssh
 
                     if (messageId == MessageId.SSH_MSG_CHANNEL_DATA)
                     {
-                        using var sftpPacket = new SftpPacket(packet.MovePayload());
-                        _logger.Received(sftpPacket); // TODO packet might not live long enough to be printed ??
+                        HandleChannelData(packet);
+                        
+
+                        // using var sftpPacket = new SftpPacket(packet.MovePayload());
+                        // _logger.Received(sftpPacket); // TODO packet might not live long enough to be printed ??
                     }
                     else
                     {
@@ -67,7 +123,31 @@ namespace Tmds.Ssh
             }
         }
 
+        private void HandleChannelData(Packet packet)
+        {
+            /*
+                byte      SSH_MSG_CHANNEL_DATA
+                uint32    recipient channel
+                string    data
+            */
+            /*
+                uint32           length
+                byte             type
+                uint32           request-id
+                    ... type specific fields ...
+            */
+            var reader = packet.GetReader();
+            reader.Skip(9);
+            uint length = reader.ReadUInt32();
+            byte type = reader.ReadByte();
+            uint requestId = reader.ReadUInt32();
+            if (_operations.TryGetValue((int)requestId, out SftpOperation operation))
+            {
+                operation.HandleResponse(packet.Payload.Slice(4 + 9));
+            }
+        }
     }
+
     internal class SftpSettings
     {
         public readonly uint version; // Negotiated SFTP version
