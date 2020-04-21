@@ -653,7 +653,7 @@ namespace Tmds.Ssh
                 int v = _allocatedChannels[i];
                 if (v != -1)
                 {
-                    for (int j = 0 ; j < BitsPerAllocatedItem; j++)
+                    for (int j = 0; j < BitsPerAllocatedItem; j++)
                     {
                         if ((v & 1) == 0)
                         {
@@ -677,7 +677,8 @@ namespace Tmds.Ssh
             _allocatedChannels[i] = _allocatedChannels[i] & ~mask;
         }
 
-         public async Task<SftpClient> OpenSftpClientAsync(CancellationToken ct) {
+        public async Task<SftpClient> OpenSftpClientAsync(CancellationToken ct)
+        {
             ChannelContext context = CreateChannel();
             SftpSettings settings;
             uint sftpVersion = 3;
@@ -696,17 +697,17 @@ namespace Tmds.Ssh
                 // Initiate SFTP session and agree on a version
                 {
                     await context.SftpInitMessageAsync(sftpVersion, ct);
-                    settings =  await context.ReceiveSftpSettingsAsync("Failed to negotiate SFTP", ct);
+                    settings = await context.ReceiveSftpSettingsAsync("Failed to negotiate SFTP", ct);
                 }
-                
-                return new SftpClient(context, settings);
+
+                return new SftpClient(context, settings, _logger);
             }
             catch
             {
                 context.Dispose(); // closing channel
                 throw;
             }
-         }
+        }
         private bool HasConnected =>
             _sendQueue != null;
     }

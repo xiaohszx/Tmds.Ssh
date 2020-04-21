@@ -22,8 +22,8 @@ namespace Tmds.Ssh
         private static readonly Action<ILogger, Exception?> _authSuccess;
         private static readonly Action<ILogger, Exception?> _authFailed;
         private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _received;
-        private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _receivedSftp;
         private static readonly Action<ILogger, MessageId?, PacketPayload, Exception?> _send;
+        private static readonly Action<ILogger, PacketId, SftpPacketPayload, Exception?> _receivedSftp;
 
         static LoggingExtensions()
         {
@@ -87,6 +87,12 @@ namespace Tmds.Ssh
                 formatString: "Authentication succeeded"
             );
 
+            _authFailed = LoggerMessage.Define(
+                eventId: 10,
+                logLevel: LogLevel.Information,
+                formatString: "Authentication failed"
+            );
+
             _received = LoggerMessage.Define<MessageId?, PacketPayload>(
                 eventId: 11,
                 logLevel: LogLevel.Trace,
@@ -99,11 +105,12 @@ namespace Tmds.Ssh
                 formatString: "Sending {messageId} {payload}"
             );
 
-            _authFailed = LoggerMessage.Define(
-                eventId: 10,
-                logLevel: LogLevel.Information,
-                formatString: "Authentication failed"
+            _receivedSftp = LoggerMessage.Define<PacketId, SftpPacketPayload>(
+                eventId: 13,
+                logLevel: LogLevel.Debug,
+                formatString: "Received {packetId} {payload}"
             );
+
         }
 
         public static void Connecting(this ILogger logger, string host, int port)
@@ -165,14 +172,15 @@ namespace Tmds.Ssh
         {
             _received(logger, packet.MessageId, new PacketPayload(packet), null);
         }
-        // public static void Received(this ILogger logger, ReadOnlySftpPacket packet)
-        // {
-        //     _receivedSftp(logger, packet.MessageId, new PacketPayload(packet), null);
-        // }
 
         public static void Send(this ILogger logger, ReadOnlyPacket packet)
         {
             _send(logger, packet.MessageId, new PacketPayload(packet), null);
+        }
+
+        public static void Received(this ILogger logger, SftpPacket packet)
+        {
+            _receivedSftp(logger, packet.Type, new SftpPacketPayload(packet.Payload), null);
         }
 
         struct PacketPayload
@@ -197,7 +205,26 @@ namespace Tmds.Ssh
                     trimmed = true;
                 }
                 return PrettyBytePrinter.ToMultiLineString(payload) +
-                    (trimmed ? $"{Environment.NewLine}..." : "" );
+                    (trimmed ? $"{Environment.NewLine}..." : "");
+            }
+        }
+
+        struct SftpPacketPayload
+        {
+            private ReadOnlySequence<byte> _payload;
+            public SftpPacketPayload(ReadOnlySequence<byte> payload)
+            {
+                _payload = payload;
+            }
+
+            public override string ToString()
+            {
+                // const int maxDataLength = 20 * PrettyBytePrinter.BytesPerLine;
+
+                bool trimmed = false;
+
+                return PrettyBytePrinter.ToMultiLineString(_payload) +
+                    (trimmed ? $"{Environment.NewLine}..." : "");
             }
         }
     }

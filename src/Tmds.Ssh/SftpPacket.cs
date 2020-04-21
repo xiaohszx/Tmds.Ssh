@@ -9,46 +9,34 @@ using System.Threading;
 
 namespace Tmds.Ssh
 {
-    // Wraps a sequence that is an SSH binary packet (https://tools.ietf.org/html/rfc4253#section-6).
-    // Functions that accept this type are responsible for Disposing it.
-    // A packet can be passed to another function:
-    // - as a ReadOnlyPacket, that function is not responsible for disposing the packet.
-    // - by calling Clone(), the caller receives a copy of the Packet, which it should Dispose.
-    // - by calling Move(), the caller receives the Packet, it can no longer be used by the current function.
     struct SftpPacket : IDisposable
     {
-        private const int HeaderLength = 5;
-        private const int MinMsgLength = HeaderLength + 1;
-        private const int PaddingOffset = 4;
-        private const int MsgTypeOffset = 5;
+        private const int HeaderOffset = 5; // MessageId + ChannelId
+        private const int DataOffset = 9; // HeaderOffset + DataLength
+        private uint _payloadLength;  // not sure if I'll need this
+        private Sequence _sequence;
+        public PacketId Type { get; }
+        public uint RequestId { get; }
 
-        private Sequence? _sequence;
-
-        public SftpPacket(Packet packet)
+        // I am unable to get Packets internal sequence because its private, 
+        // so I just take the sequence with stripped header and padding from MovePayload()
+        // TODO deal with CHANNEL_DATA packet that has multiple of SftpPackets
+        public SftpPacket(Sequence packetPayload)
         {
-			// TODO analyze the sequences
-            
-        }
+            /*
+                byte      SSH_MSG_CHANNEL_DATA
+                uint32    recipient channel
+                uint32    dataLength
+                uint32    firstSftpPacketLength
+           */
+            _sequence = packetPayload;
 
-        public bool IsEmpty
-            => _sequence == null || _sequence.IsEmpty;
-
-        public void Dispose()
-        {
-            _sequence?.Dispose();
-            _sequence = null;
-        }
-
-        public Packet Move()
-        {
-            Sequence? sequence = _sequence;
-            _sequence = null;
-            return new Packet(sequence, checkHeader: false);
-        }
-
-        public Packet Clone()
-        {
-            return new Packet(_sequence?.Clone(), checkHeader: false);
+            var reader = new SequenceReader(_sequence);
+            reader.Skip(HeaderOffset);
+            _payloadLength = reader.ReadUInt32();
+            _payloadLength = reader.ReadUInt32(); // TODO fix the assumption that the DATA has only one Sftp packet
+            Type = (PacketId)reader.ReadByte();
+            RequestId = reader.ReadUInt32();
         }
 
         public ReadOnlySequence<byte> Payload
@@ -60,123 +48,18 @@ namespace Tmds.Ssh
                     return default;
                 }
 
-                long payloadLength = PayloadLength;
-                if (payloadLength == 0)
+                if (_payloadLength == 0)
                 {
                     return default;
                 }
 
-                return _sequence.AsReadOnlySequence().Slice(MsgTypeOffset, payloadLength);
+                return _sequence.AsReadOnlySequence().Slice(DataOffset, _payloadLength);
             }
         }
-
-        public long PayloadLength
+        // Think about proper disposing pattern for this
+        public void Dispose()
         {
-            get
-            {
-                if (_sequence == null)
-                {
-                    return 0;
-                }
-
-                long sequenceLength = _sequence.Length;
-                if (sequenceLength < HeaderLength)
-                {
-                    return 0;
-                }
-
-                return sequenceLength - HeaderLength - _sequence.FirstSpan[PaddingOffset];
-            }
-        }
-
-        public MessageId? MessageId
-        {
-            get
-            {
-                if (_sequence == null)
-                {
-                    return null;
-                }
-
-                long sequenceLength = _sequence.Length;
-                if (sequenceLength < MinMsgLength)
-                {
-                    return null;
-                }
-
-                return (MessageId)_sequence.FirstSpan[MsgTypeOffset];
-            }
-        }
-
-        public SequenceReader GetReader() =>
-            new SequenceReader(Payload);
-
-        public SequenceWriter GetWriter()
-        {
-            if (_sequence == null)
-            {
-                ThrowSequenceEmpty();
-            }
-
-            // Check whether the header bytes have been filled in.
-            for (int i = PaddingOffset; i >= 0; i--)
-            {
-                if (_sequence.FirstSpan[i] != 0)
-                {
-                    ThrowPacketReadOnly();
-                }
-            }
-
-            return new SequenceWriter(_sequence);
-        }
-
-        public void WriteHeaderAndPadding(byte paddingLength)
-        {
-            GetWriter().WriteRandomBytes(paddingLength);
-
-            Span<byte> firstSpan = _sequence!.FirstSpan;
-            BinaryPrimitives.WriteUInt32BigEndian(firstSpan, (uint)(_sequence.Length - 4));
-            firstSpan[PaddingOffset] = paddingLength;
-        }
-
-        internal ReadOnlySequence<byte> AsReadOnlySequence()
-        {
-            if (_sequence == null)
-            {
-                return default;
-            }
-
-            return _sequence.AsReadOnlySequence();
-        }
-
-        [DoesNotReturn]
-        private static void ThrowSequenceEmpty()
-        {
-            throw new InvalidOperationException("The sequence is empty.");
-        }
-
-        [DoesNotReturn]
-        private static void ThrowPacketReadOnly()
-        {
-            throw new InvalidOperationException("The packet is readonly.");
-        }
-
-        public Sequence MovePayload()
-        {
-            if (_sequence == null)
-            {
-                ThrowSequenceEmpty();
-            }
-
-            var sequence = _sequence;
-            _sequence = null;
-
-            // Remove padding.
-            sequence.RemoveBack(sequence.FirstSpan[PaddingOffset]);
-            // Remove header.
-            sequence.Remove(HeaderLength);
-
-            return sequence;
+            _sequence.Dispose();
         }
     }
 }
