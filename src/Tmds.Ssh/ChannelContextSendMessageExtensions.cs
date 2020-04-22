@@ -227,16 +227,16 @@ namespace Tmds.Ssh
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(9); // length
                 writer.WriteUInt32(5); // length
-                writer.WriteByte((byte)PacketId.SSH_FXP_INIT);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_INIT);
                 writer.WriteUInt32(version); // version
                 return packet.Move();
             }
         }
-        public static ValueTask SftpOpenDirMessageAsync(this ChannelContext context, int requestId, string path, CancellationToken ct)
+        public static ValueTask SftpOpenDirMessageAsync(this ChannelContext context, UInt32 requestId, string path, CancellationToken ct)
         {
             return context.SendPacketAsync(CreatePacket(context, requestId, path), ct);
 
-            static Packet CreatePacket(ChannelContext context, int requestId, string path)
+            static Packet CreatePacket(ChannelContext context, UInt32 requestId, string path)
             {
                 /*
                     byte      SSH_MSG_CHANNEL_DATA
@@ -255,17 +255,17 @@ namespace Tmds.Ssh
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(1 + 4 + 4 + 4 + stringLength);
                 writer.WriteUInt32(1 + 4 + 4 + stringLength);
-                writer.WriteByte((byte)PacketId.SSH_FXP_OPENDIR);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_OPENDIR);
                 writer.WriteUInt32(requestId);
                 writer.WriteString(path);
                 return packet.Move();
             }
         }
-        public static ValueTask SftpReadDirMessageAsync(this ChannelContext context, int requestId, string handle, CancellationToken ct)
+        public static ValueTask SftpReadDirMessageAsync(this ChannelContext context, UInt32 requestId, string handle, CancellationToken ct)
         {
             return context.SendPacketAsync(CreatePacket(context, requestId, handle), ct);
 
-            static Packet CreatePacket(ChannelContext context, int requestId, string handle)
+            static Packet CreatePacket(ChannelContext context, UInt32 requestId, string handle)
             {
                 /*
                     byte      SSH_MSG_CHANNEL_DATA
@@ -284,9 +284,42 @@ namespace Tmds.Ssh
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(1 + 4 + 4 + 4 + stringLength);
                 writer.WriteUInt32(1 + 4 + 4 + stringLength);
-                writer.WriteByte((byte)PacketId.SSH_FXP_READDIR);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_READDIR);
                 writer.WriteUInt32(requestId);
                 writer.WriteString(handle);
+                return packet.Move();
+            }
+        }
+        public static ValueTask SftpOpenFileMessageAsync(this ChannelContext context, UInt32 requestId, string path, FileOpenFlags openFlags, FileAttributes attrs, CancellationToken ct)
+        {
+            return context.SendPacketAsync(CreatePacket(context, requestId, path, openFlags, attrs), ct);
+
+            static Packet CreatePacket(ChannelContext context, UInt32 requestId, string path, FileOpenFlags openFlags, FileAttributes attrs)
+            {
+                /*
+                    byte      SSH_MSG_CHANNEL_DATA
+                    uint32    recipient channel
+                    uint32    data_length
+                    uint32    packet_length
+                    byte          sftp_type
+                    uint32        id
+                    string        filename
+                    uint32        pflags
+                    ATTRS         attrs
+                */
+                var stringLength = System.Text.ASCIIEncoding.ASCII.GetByteCount(path);
+
+                using var packet = context.RentPacket();
+                var writer = packet.GetWriter();
+                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
+                writer.WriteUInt32(context.RemoteChannel);
+                writer.WriteUInt32(1 + 4 + 4 + 4 + 4 + 4 + stringLength);
+                writer.WriteUInt32(1 + 4 + 4 + 4 + 4 + stringLength);
+                writer.WriteByte((byte)SftpPacketType.SSH_FXP_OPEN);
+                writer.WriteUInt32(requestId);
+                writer.WriteString(path);
+                writer.WriteUInt32((UInt32)openFlags);
+                writer.WriteUInt32(attrs.flags);
                 return packet.Move();
             }
         }

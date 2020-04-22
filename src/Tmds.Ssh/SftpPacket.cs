@@ -12,10 +12,10 @@ namespace Tmds.Ssh
     struct SftpPacket : IDisposable
     {
         private const int HeaderOffset = 5; // MessageId + ChannelId
-        private const int DataOffset = 9; // HeaderOffset + DataLength
+        private const int DataOffset = 13; // HeaderOffset + DataLength + FirstPacketLength
         private uint _payloadLength;  // not sure if I'll need this
         private Sequence _sequence;
-        public PacketId Type { get; }
+        public SftpPacketType Type { get; }
         public uint RequestId { get; }
 
         // I am unable to get Packets internal sequence because its private, 
@@ -35,7 +35,7 @@ namespace Tmds.Ssh
             reader.Skip(HeaderOffset);
             _payloadLength = reader.ReadUInt32();
             _payloadLength = reader.ReadUInt32(); // TODO fix the assumption that the DATA has only one Sftp packet
-            Type = (PacketId)reader.ReadByte();
+            Type = (SftpPacketType)reader.ReadByte();
             RequestId = reader.ReadUInt32();
         }
 

@@ -7,28 +7,130 @@ using System.Buffers.Binary;
 using Tmds.Ssh;
 using System.Text;
 using System.IO;
+using System.Collections.Concurrent;
+using System.Buffers;
+
 namespace Tmds.Ssh
 {
+    abstract class SftpOperation
+    {
+        public abstract void HandleResponse(ReadOnlySequence<byte> response);
+    }
+
+    public class SftpFile
+    {
+        private byte[] handle;
+        internal SftpFile(byte[] handle)
+        {
+            this.handle = handle;
+        }
+    }
+
+    class OpenDirOperation : SftpOperation
+    {
+        private TaskCompletionSource<byte[]> _tcs = new TaskCompletionSource<byte[]>();
+
+        public override void HandleResponse(ReadOnlySequence<byte> response)
+        {
+            /*
+                   byte   SSH_FXP_HANDLE
+            uint32 request-id
+            string handle
+            */
+
+            var reader = new SequenceReader(response);
+            byte type = reader.ReadByte();
+            reader.SkipUInt32();
+            byte[] handle = reader.ReadStringAsBytes().ToArray();
+            _tcs.SetResult(handle);
+        }
+
+        public Task<byte[]> Task => _tcs.Task;
+    }
+    /*
+        Right now operation is for version 3 of the SFTP protocol,
+        But how do we handle different SFTP protocols 
+        or do we support only one of them?
+     */
+    class OpenFileOperation : SftpOperation
+    {
+        private TaskCompletionSource<SftpFile> _tcs = new TaskCompletionSource<SftpFile>();
+
+        public override void HandleResponse(ReadOnlySequence<byte> response)
+        {
+
+            /*
+                The response to this message will be either SSH_FXP_HANDLE(if the
+                operation is successful) or SSH_FXP_STATUS(if the operation fails).
+            */
+
+            var reader = new SequenceReader(response);
+            var type = (SftpPacketType)reader.ReadByte();
+            if (type == SftpPacketType.SSH_FXP_STATUS)
+            {
+                // Handle failure??? Should I throw an exception 
+                // or return an class with a flag or empty handle?
+                Console.WriteLine("FAILURE !!!");
+                _tcs.SetResult(new SftpFile(Array.Empty<byte>()));
+            }
+            else if (type == SftpPacketType.SSH_FXP_HANDLE)
+            {
+                reader.SkipUInt32();
+                byte[] handle = reader.ReadStringAsBytes().ToArray();
+                _tcs.SetResult(new SftpFile(handle));
+
+            }
+            throw new SshException("This probably shouldn't ever happen"); // or should?
+        }
+
+        public Task<SftpFile> Task => _tcs.Task;
+    }
+
     public class SftpClient : IDisposable
     {
         private ChannelContext _context;
         private readonly SftpSettings _settings;
         private readonly Task _receiveLoopTask;
         private readonly ILogger _logger;
-        private int requestId;
-        public async ValueTask ListFilesAsync(string directory)
+        private int _requestId;
+        private ConcurrentDictionary<int, SftpOperation> _operations;
+
+        private int GetNextRequestId()
         {
-            // SSH_FXP_READDIR until SSH_FXP_STATUS if error or SSH_FX_EOF to read all file names, then close the handle 
-            await _context.SftpOpenDirMessageAsync(requestId++, directory, CancellationToken.None);
-            await _context.SftpReadDirMessageAsync(requestId++, "\x00\x00\x00\x00", CancellationToken.None);
+            return Interlocked.Increment(ref _requestId);
         }
+
+        // ValueTask<SftpFile> OpenFileAsync(ReadOnlySpan<byte> path, SftpAccessFlags access, SftpOpenFlags openFlags, SetAttributes? setAttributes = null);
+        public async Task<byte[]> OpenDirAsync(string directory)
+        {
+            int requestId = GetNextRequestId();
+            var operation = new OpenDirOperation();
+
+            _operations.TryAdd(requestId, operation);
+
+            await _context.SftpOpenDirMessageAsync((UInt32)requestId, directory, default);
+
+            return await operation.Task;
+        }
+        public async Task<SftpFile> OpenFileAsync(string path, FileOpenFlags openFlags, FileAttributes attributes)
+        {
+            int requestId = GetNextRequestId();
+            var operation = new OpenFileOperation();
+
+            _operations.TryAdd(requestId, operation);
+
+            await _context.SftpOpenFileMessageAsync((UInt32)requestId, path, openFlags, attributes, default);
+            return await operation.Task;
+        }
+
         internal SftpClient(ChannelContext context, SftpSettings settings, ILogger logger)
         {
             _context = context;
             _settings = settings;
             _receiveLoopTask = ReceiveLoopAsync();
             _logger = logger;
-            requestId = 0;
+            _requestId = 0;
+            _operations = new ConcurrentDictionary<int, SftpOperation>();
         }
         public void Dispose()
         {
@@ -43,13 +145,11 @@ namespace Tmds.Ssh
                 do
                 {
                     using var packet = await _context.ReceivePacketAsync(ct: default).ConfigureAwait(false);
-                    // SshContext ReceivePacket should already handle failures and window adjustments
                     messageId = packet.MessageId!.Value;
 
                     if (messageId == MessageId.SSH_MSG_CHANNEL_DATA)
                     {
-                        using var sftpPacket = new SftpPacket(packet.MovePayload());
-                        _logger.Received(sftpPacket); // TODO packet might not live long enough to be printed ??
+                        HandleChannelData(packet);
                     }
                     else
                     {
@@ -58,16 +158,39 @@ namespace Tmds.Ssh
 
                 } while (messageId != MessageId.SSH_MSG_CHANNEL_CLOSE);
 
-                // _readQueue.Writer.Complete();
             }
             catch (Exception e)
             {
-                // _readQueue.Writer.Complete(e);
                 throw e;
             }
         }
 
+        private void HandleChannelData(Packet packet)
+        {
+            /*
+                byte      SSH_MSG_CHANNEL_DATA
+                uint32    recipient channel
+                string    data
+            */
+            /*
+                uint32           length
+                byte             type
+                uint32           request-id
+                    ... type specific fields ...
+            */
+            // assumes the packet in message is only one right now
+            var reader = packet.GetReader();
+            reader.Skip(9);
+            uint length = reader.ReadUInt32();
+            byte type = reader.ReadByte();
+            uint requestId = reader.ReadUInt32();
+            if (_operations.TryGetValue((int)requestId, out SftpOperation operation))
+            {
+                operation.HandleResponse(packet.Payload.Slice(4 + 9));
+            }
+        }
     }
+
     internal class SftpSettings
     {
         public readonly uint version; // Negotiated SFTP version
@@ -78,12 +201,20 @@ namespace Tmds.Ssh
             this.extensions = extensions;
         }
     }
-
-    ref struct FileAttributes
+    public enum FileOpenFlags : Int32
+    {
+        READ = 0x00000001,
+        WRITE = 0x00000002,
+        APPEND = 0x00000004,
+        CREAT = 0x00000008,
+        TRUNC = 0x00000010,
+        EXCL = 0x00000020,
+    }
+    // TODO how to handle this?
+    public struct FileAttributes
     {
         /*
         FLAGS
-
         #define SSH_FILEXFER_ATTR_SIZE          0x00000001
         #define SSH_FILEXFER_ATTR_UIDGID        0x00000002
         #define SSH_FILEXFER_ATTR_PERMISSIONS   0x00000004
@@ -91,22 +222,21 @@ namespace Tmds.Ssh
         #define SSH_FILEXFER_ATTR_EXTENDED      0x80000000
          */
 
-        UInt32 flags;
-        UInt64 size;           //   present only if flag SSH_FILEXFER_ATTR_SIZE
-        UInt32 uid;            //   present only if flag SSH_FILEXFER_ATTR_UIDGID
-        UInt32 gid;            //   present only if flag SSH_FILEXFER_ATTR_UIDGID
-        UInt32 permissions;    //   present only if flag SSH_FILEXFER_ATTR_PERMISSIONS
-        UInt32 atime;          //   present only if flag SSH_FILEXFER_ACMODTIME
-        UInt32 mtime;          //   present only if flag SSH_FILEXFER_ACMODTIME
-        UInt32 extended_count; //   present only if flag SSH_FILEXFER_ATTR_EXTENDED
+        public UInt32 flags;
+        public UInt64 size;           //   present only if flag SSH_FILEXFER_ATTR_SIZE
+        public UInt32 uid;            //   present only if flag SSH_FILEXFER_ATTR_UIDGID
+        public UInt32 gid;            //   present only if flag SSH_FILEXFER_ATTR_UIDGID
+        public UInt32 permissions;    //   present only if flag SSH_FILEXFER_ATTR_PERMISSIONS
+        public UInt32 atime;          //   present only if flag SSH_FILEXFER_ACMODTIME
+        public UInt32 mtime;          //   present only if flag SSH_FILEXFER_ACMODTIME
+        public UInt32 extended_count; //   present only if flag SSH_FILEXFER_ATTR_EXTENDED
 
-        List<Tuple<string, string>> extensions; // Type/Data Tuples
+        string?[] extensions; // Type/Data Tuples
         // string   extended_type;
         // string   extended_data;
         // ...      more extended data (extended_type - extended_data pairs),
         //            so that number of pairs equals extended_count
-
-        public FileAttributes(ref SequenceReader reader)
+        internal FileAttributes(ref SequenceReader reader)
         {
             flags = reader.ReadUInt32();
             size = uid = gid = permissions = atime = mtime = extended_count = 0;
@@ -133,15 +263,21 @@ namespace Tmds.Ssh
                 extended_count = reader.ReadUInt32();
             }
 
-            extensions = new List<Tuple<string, string>>();
+            extensions = new string[extended_count];
 
             for (int i = 0; i < extended_count; i++)
             {
-                string extended_type = reader.ReadUtf8String();
-                string extended_data = reader.ReadUtf8String();
-
-                extensions.Add(new Tuple<string, string>(extended_type, extended_data));
+                extensions[i] = reader.ReadUtf8String();
             }
+        }
+
+        // Todo think how the hell let people create one
+        // lets keep it simple now?
+        public FileAttributes(UInt32 flags)
+        {
+            this.flags = flags;
+            size = uid = gid = permissions = atime = mtime = extended_count = 0;
+            extensions = Array.Empty<string>();
         }
     }
 }
