@@ -69,11 +69,11 @@ namespace Tmds.Ssh
             }
         }
 
-        public static async ValueTask<SftpSettings> ReceiveSftpSettingsAsync(this ChannelContext context, string failureMessage, CancellationToken ct)
+        public static async ValueTask ReceiveSftpSettingsAsync(this ChannelContext context, string failureMessage, CancellationToken ct)
         {
             using var packet = await context.ReceivePacketAsync(ct).ConfigureAwait(false);
 
-            return ParseSftpSettings(packet, failureMessage);
+            ParseSftpSettings(packet, failureMessage);
             /*
                         byte            SSH_MSG_CHANNEL_DATA
                         uint32          recipient channel
@@ -86,51 +86,39 @@ namespace Tmds.Ssh
                         string          extension-data
             */
 
-            static SftpSettings ParseSftpSettings(ReadOnlyPacket packet, string failureMessage)
+            static void ParseSftpSettings(ReadOnlyPacket packet, string failureMessage)
             {
                 var reader = packet.GetReader();
-                var msgId = reader.ReadMessageId();
-                switch (msgId)
+                reader.ReadMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
+                var channelId = reader.ReadUInt32();
+                var dataLength = reader.ReadUInt32();
+                if (dataLength < 5) // Not appropriate SSH_FXP_VERSION packet
+                    ThrowHelper.ThrowProtocolInvalidPacketLength();
+
+                var sftpPacketLength = reader.ReadUInt32();
+                var type = (SftpPacketType)reader.ReadByte();
+                var version = reader.ReadUInt32();
+
+                var extensions = new List<Tuple<string, string>>();
+                // TODO have a look at how extensions are passed across various SFTP versions (Some use different packet)
+                if (version == 3 || version == 6)
                 {
-                    // TODO think how to deal with other scenarios than success
-                    // If reading fails because of incorrect packet then readers throw UnexpectedEndOfPacket
-                    case MessageId.SSH_MSG_CHANNEL_DATA:
-                        var channelId = reader.ReadUInt32();
-                        var dataLength = reader.ReadUInt32();
-                        if (dataLength < 5) // Not appropriate SSH_FXP_VERSION packet
+                    sftpPacketLength -= 5;
+                    while (sftpPacketLength > 0)
+                    { // read extensions
+                        var extensionName = reader.ReadUtf8String();
+                        var extensionData = reader.ReadUtf8String();
+                        extensions.Add(new Tuple<string, string>(extensionName, extensionData));
+
+                        // TODO Length returns number of chars, but UTF has variable amount of bytes per char
+                        if (extensionData.Length + extensionName.Length + 4 + 4 > sftpPacketLength)
                             ThrowHelper.ThrowProtocolInvalidPacketLength();
-
-                        var sftpPacketLength = reader.ReadUInt32();
-                        var type = (SftpPacketType)reader.ReadByte();
-                        var version = reader.ReadUInt32();
-
-                        var extensions = new List<Tuple<string, string>>();
-                        // TODO have a look at how extensions are passed across various SFTP versions (Some use different packet)
-                        if (version == 3 || version == 6)
-                        {
-                            sftpPacketLength -= 5;
-                            while (sftpPacketLength > 0)
-                            { // read extensions
-                                var extensionName = reader.ReadUtf8String();
-                                var extensionData = reader.ReadUtf8String();
-                                extensions.Add(new Tuple<string, string>(extensionName, extensionData));
-
-                                // TODO Length returns number of chars, but UTF has variable amount of bytes per char
-                                if (extensionData.Length + extensionName.Length + 4 + 4 > sftpPacketLength)
-                                    ThrowHelper.ThrowProtocolInvalidPacketLength();
-                                sftpPacketLength -= (uint)(extensionData.Length + extensionName.Length + 4 + 4); // RHS should be always positive and <= LHS
-                            }
-                        }
-                        return new SftpSettings(version, extensions);
-                    case MessageId.SSH_MSG_CHANNEL_FAILURE:
-                        throw new ChannelRequestFailed(failureMessage);
-                    default:
-                        ThrowHelper.ThrowProtocolUnexpectedMessageId(msgId);
-                        break;
+                        sftpPacketLength -= (uint)(extensionData.Length + extensionName.Length + 4 + 4); // RHS should be always positive and <= LHS
+                    }
                 }
-                return null; // To stop compiler to complain about that not all code paths return value because of the exception raise through ThrowHelper.ThrowProtocolUnexpectedMessageId(msgId);
             }
         }
+
         public static async ValueTask<string> ReceiveDirectoryHandleAsync(this ChannelContext context, string failureMessage, CancellationToken ct)
         {
             using var packet = await context.ReceivePacketAsync(ct).ConfigureAwait(false);

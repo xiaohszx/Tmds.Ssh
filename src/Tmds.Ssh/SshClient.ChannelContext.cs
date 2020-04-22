@@ -361,6 +361,43 @@ namespace Tmds.Ssh
                 }
             }
 
+            public override async ValueTask SendChannelDataAsync(Packet packet, CancellationToken ct)
+            {
+                long toSend = packet.PayloadLength - 9; // TODO: verify
+                while (true)
+                {
+                    int sendWindow = Volatile.Read(ref _sendWindow);
+                    if (sendWindow > toSend)
+                    {
+                        int toSend = Math.Min(sendWindow, memory.Length);
+                        toSend = Math.Min(toSend, RemoteMaxPacketSize);
+                        if (Interlocked.CompareExchange(ref _sendWindow, sendWindow - toSend, sendWindow) == sendWindow)
+                        {
+                            await this.SendChannelDataMessageAsync(memory.Slice(0, toSend), ct).ConfigureAwait(false);
+                            memory = memory.Slice(toSend);
+                            if (memory.IsEmpty)
+                            {
+                                return;
+                            }
+                        }
+                    }
+                    try
+                    {
+                        await _sendWindowAvailableEvent.WaitAsync(ChannelStopped, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException e)
+                    {
+                        // Cancelling a send aborts the channel.
+                        Abort(e);
+
+                        ct.ThrowIfCancellationRequested();
+                        ThrowIfChannelStopped();
+
+                        throw;
+                    }
+                }
+            }
+
             public override async ValueTask SendChannelDataAsync(ReadOnlyMemory<byte> memory, CancellationToken ct)
             {
                 while (memory.Length > 0)
