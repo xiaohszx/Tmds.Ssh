@@ -28,7 +28,7 @@ namespace Tmds.Ssh
             private LocalChannelState _localChannelState;
             private bool _disposed;
             private readonly AsyncEvent _remoteClosedChannelEvent;
-            private MultiSemaphore _sendWindow;
+            private readonly MultiSemaphore _sendWindow;
             private int _receiveWindow;
             private AsyncEvent _channelOpenDoneEvent;
             private const int CancelByUser = 1;
@@ -351,38 +351,22 @@ namespace Tmds.Ssh
 
             public override async ValueTask SendChannelDataAsync(Packet packet, CancellationToken ct)
             {
+                using var pkt = packet.Move();
                 long toSend = packet.PayloadLength - 9; // TODO: verify
-                while (true)
+                try
                 {
-                    int sendWindow = Volatile.Read(ref _sendWindow);
-                    if (sendWindow > toSend)
-                    {
-                        int toSend = Math.Min(sendWindow, memory.Length);
-                        toSend = Math.Min(toSend, RemoteMaxPacketSize);
-                        if (Interlocked.CompareExchange(ref _sendWindow, sendWindow - toSend, sendWindow) == sendWindow)
-                        {
-                            await this.SendChannelDataMessageAsync(memory.Slice(0, toSend), ct).ConfigureAwait(false);
-                            memory = memory.Slice(toSend);
-                            if (memory.IsEmpty)
-                            {
-                                return;
-                            }
-                        }
-                    }
-                    try
-                    {
-                        await _sendWindowAvailableEvent.WaitAsync(ChannelStopped, ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException e)
-                    {
-                        // Cancelling a send aborts the channel.
-                        Abort(e);
+                    await _sendWindow.AquireAsync(aquireCount: (int)toSend, exactCount: true, ChannelStopped, ct).ConfigureAwait(false);
+                    await SendPacketAsync(pkt.Move(), ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException e)
+                {
+                    // Cancelling a send aborts the channel.
+                    Abort(e);
 
-                        ct.ThrowIfCancellationRequested();
-                        ThrowIfChannelStopped();
+                    ct.ThrowIfCancellationRequested();
+                    ThrowIfChannelStopped();
 
-                        throw;
-                    }
+                    throw;
                 }
             }
 
