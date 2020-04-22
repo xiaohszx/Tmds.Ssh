@@ -231,7 +231,7 @@ namespace Tmds.Ssh
         public UInt32 mtime;          //   present only if flag SSH_FILEXFER_ACMODTIME
         public UInt32 extended_count; //   present only if flag SSH_FILEXFER_ATTR_EXTENDED
 
-        string?[] extensions; // Type/Data Tuples
+        string[] extensions; // Type/Data Tuples
         // string   extended_type;
         // string   extended_data;
         // ...      more extended data (extended_type - extended_data pairs),
