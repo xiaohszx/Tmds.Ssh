@@ -680,7 +680,6 @@ namespace Tmds.Ssh
         public async Task<SftpClient> OpenSftpClientAsync(CancellationToken ct)
         {
             ChannelContext context = CreateChannel();
-            SftpSettings settings;
             uint sftpVersion = 3;
             try
             {
@@ -694,13 +693,14 @@ namespace Tmds.Ssh
                     await context.StartSftpAsync(ct).ConfigureAwait(false);
                     await context.ReceiveChannelRequestSuccessAsync("Failed to start sftp.", ct).ConfigureAwait(false);
                 }
+                // TODO: move this into SftpClient method (e.g. InitAsync.
                 // Initiate SFTP session and agree on a version
                 {
-                    await context.SftpInitMessageAsync(sftpVersion, ct);
-                    settings = await context.ReceiveSftpSettingsAsync("Failed to negotiate SFTP", ct);
+                    await context.SftpInitMessageAsync(sftpVersion, ct).ConfigureAwait(false);
+                    await context.ReceiveSftpSettingsAsync("Failed to negotiate SFTP", ct).ConfigureAwait(false);
                 }
 
-                return new SftpClient(context, settings, _logger);
+                return new SftpClient(context);
             }
             catch
             {
