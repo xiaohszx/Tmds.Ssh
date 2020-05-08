@@ -79,6 +79,20 @@ namespace Tmds.Ssh
             }
         }
 
+        public SftpPacketType ReadSftpPacketType()
+        {
+            return (SftpPacketType)ReadByte();
+        }
+
+        public void ReadSftpPacketType(SftpPacketType expectedValue)
+        {
+            SftpPacketType value = ReadSftpPacketType();
+            if (value != expectedValue)
+            {
+                ThrowHelper.ThrowProtocolUnexpectedValue();
+            }
+        }
+
         public uint ReadUInt32()
         {
             if (_reader.TryReadBigEndian(out int i))

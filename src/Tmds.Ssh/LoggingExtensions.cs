@@ -86,6 +86,12 @@ namespace Tmds.Ssh
                 formatString: "Authentication succeeded"
             );
 
+            _authFailed = LoggerMessage.Define(
+                eventId: 10,
+                logLevel: LogLevel.Information,
+                formatString: "Authentication failed"
+            );
+
             _received = LoggerMessage.Define<MessageId?, PacketPayload>(
                 eventId: 11,
                 logLevel: LogLevel.Trace,
@@ -96,12 +102,6 @@ namespace Tmds.Ssh
                 eventId: 12,
                 logLevel: LogLevel.Trace,
                 formatString: "Sending {messageId} {payload}"
-            );
-
-            _authFailed = LoggerMessage.Define(
-                eventId: 10,
-                logLevel: LogLevel.Information,
-                formatString: "Authentication failed"
             );
         }
 
@@ -192,7 +192,7 @@ namespace Tmds.Ssh
                     trimmed = true;
                 }
                 return PrettyBytePrinter.ToMultiLineString(payload) +
-                    (trimmed ? $"{Environment.NewLine}..." : "" );
+                    (trimmed ? $"{Environment.NewLine}..." : "");
             }
         }
     }

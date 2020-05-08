@@ -3,7 +3,8 @@
 
 using System.Threading;
 using System.Threading.Tasks;
-
+using System.Collections.Generic;
+using System;
 namespace Tmds.Ssh
 {
     static class ChannelContextReceiveMessageExtensions

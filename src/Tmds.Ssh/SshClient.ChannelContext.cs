@@ -28,7 +28,7 @@ namespace Tmds.Ssh
             private LocalChannelState _localChannelState;
             private bool _disposed;
             private readonly AsyncEvent _remoteClosedChannelEvent;
-            private MultiSemaphore _sendWindow;
+            private readonly MultiSemaphore _sendWindow;
             private int _receiveWindow;
             private AsyncEvent _channelOpenDoneEvent;
             private const int CancelByUser = 1;
@@ -349,6 +349,27 @@ namespace Tmds.Ssh
                 }
             }
 
+            public override async ValueTask SendChannelDataAsync(Packet packet, CancellationToken ct)
+            {
+                using var pkt = packet.Move();
+                long toSend = packet.PayloadLength - 9;
+                try
+                {
+                    await _sendWindow.AquireAsync(aquireCount: (int)toSend, exactCount: true, ChannelStopped, ct).ConfigureAwait(false);
+                    await SendPacketAsync(pkt.Move(), ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException e)
+                {
+                    // Cancelling a send aborts the channel.
+                    Abort(e);
+
+                    ct.ThrowIfCancellationRequested();
+                    ThrowIfChannelStopped();
+
+                    throw;
+                }
+            }
+
             public override async ValueTask SendChannelDataAsync(ReadOnlyMemory<byte> memory, CancellationToken ct)
             {
                 while (memory.Length > 0)
@@ -369,6 +390,27 @@ namespace Tmds.Ssh
 
                         throw;
                     }
+                }
+            }
+
+            private ValueTask SendChannelDataMessageAsync(ReadOnlyMemory<byte> memory, CancellationToken ct)
+            {
+                return SendChannelDataAsync(CreatePacket(memory), ct);
+
+                Packet CreatePacket(ReadOnlyMemory<byte> memory)
+                {
+                    /*
+                        byte      SSH_MSG_CHANNEL_DATA
+                        uint32    recipient channel
+                        string    data
+                    */
+
+                    using var packet = RentPacket();
+                    var writer = packet.GetWriter();
+                    writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
+                    writer.WriteUInt32(RemoteChannel);
+                    writer.WriteString(memory.Span);
+                    return packet.Move();
                 }
             }
 

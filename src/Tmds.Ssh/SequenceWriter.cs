@@ -74,12 +74,9 @@ namespace Tmds.Ssh
             AppendAlloced(1);
         }
 
-        public void WriteMessageId(MessageId value)
-        {
-            var span = AllocGetSpan(1);
-            span[0] = (byte)value;
-            AppendAlloced(1);
-        }
+        public void WriteMessageId(MessageId value) => WriteByte((byte)value);
+
+        public void WriteSftpPacketType(SftpPacketType value) => WriteByte((byte)value);
 
         public void WriteUInt32(uint value)
         {
@@ -220,6 +217,18 @@ namespace Tmds.Ssh
             else
             {
                 WriteMultiple(value, span);
+            }
+        }
+
+        public void Reserve(int count)
+        {
+            while (count > 0)
+            {
+                Span<byte> span = AllocGetSpan(count);
+                int spanCount = Math.Min(count, span.Length);
+                span.Slice(0, spanCount).Clear();
+                AppendAlloced(spanCount);
+                count -= spanCount;
             }
         }
 

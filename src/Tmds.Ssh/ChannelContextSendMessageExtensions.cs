@@ -28,27 +28,6 @@ namespace Tmds.Ssh
             }
         }
 
-        public static ValueTask SendChannelDataMessageAsync(this ChannelContext context,  ReadOnlyMemory<byte> memory, CancellationToken ct)
-        {
-            return context.SendPacketAsync(CreatePacket(context, memory), ct);
-
-            static Packet CreatePacket(ChannelContext context, ReadOnlyMemory<byte> memory)
-            {
-                /*
-                    byte      SSH_MSG_CHANNEL_DATA
-                    uint32    recipient channel
-                    string    data
-                */
-
-                using var packet = context.RentPacket();
-                var writer = packet.GetWriter();
-                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_DATA);
-                writer.WriteUInt32(context.RemoteChannel);
-                writer.WriteString(memory.Span);
-                return packet.Move();
-            }
-        }
-
         public static ValueTask SendChannelOpenDirectStreamLocalMessageAsync(this ChannelContext context, string socketPath, CancellationToken ct)
         {
             return context.SendPacketAsync(CreatePacket(context, socketPath), ct);
@@ -179,6 +158,31 @@ namespace Tmds.Ssh
                 writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_WINDOW_ADJUST);
                 writer.WriteUInt32(context.RemoteChannel);
                 writer.WriteUInt32(bytesToAdd);
+                return packet.Move();
+            }
+        }
+
+        public static ValueTask SendChannelSubsystemMessageAsync(this ChannelContext context, string subsystem, CancellationToken ct)
+        {
+            return context.SendPacketAsync(CreatePacket(context, subsystem), ct);
+
+            static Packet CreatePacket(ChannelContext context, string subsystem)
+            {
+                /*
+                    byte      SSH_MSG_CHANNEL_REQUEST
+                    uint32    recipient channel
+                    string    "subsystem"
+                    boolean   want reply
+                    string    "name"
+                 */
+
+                using var packet = context.RentPacket();
+                var writer = packet.GetWriter();
+                writer.WriteMessageId(MessageId.SSH_MSG_CHANNEL_REQUEST);
+                writer.WriteUInt32(context.RemoteChannel);
+                writer.WriteString("subsystem");
+                writer.WriteBoolean(true);
+                writer.WriteString(subsystem);
                 return packet.Move();
             }
         }

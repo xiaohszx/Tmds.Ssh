@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -45,7 +46,7 @@ namespace Tmds.Ssh
         {
             _abortCts = new CancellationTokenSource();
 
-            _settings = CreateSettingsForDetination(destination);
+            _settings = CreateSettingsForDestination(destination);
             if (configure == null)
             {
                 _settings.Credentials.Add(new IdentityFileCredential(IdentityFileCredential.RsaIdentityFile));
@@ -64,7 +65,7 @@ namespace Tmds.Ssh
             };
         }
 
-        private static SshClientSettings CreateSettingsForDetination(string destination)
+        private static SshClientSettings CreateSettingsForDestination(string destination)
         {
             if (destination == null)
             {
@@ -652,7 +653,7 @@ namespace Tmds.Ssh
                 int v = _allocatedChannels[i];
                 if (v != -1)
                 {
-                    for (int j = 0 ; j < BitsPerAllocatedItem; j++)
+                    for (int j = 0; j < BitsPerAllocatedItem; j++)
                     {
                         if ((v & 1) == 0)
                         {
@@ -675,7 +676,6 @@ namespace Tmds.Ssh
             int mask = 1 << (nri % BitsPerAllocatedItem);
             _allocatedChannels[i] = _allocatedChannels[i] & ~mask;
         }
-
         private bool HasConnected =>
             _sendQueue != null;
     }
