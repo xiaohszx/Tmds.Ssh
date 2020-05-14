@@ -21,18 +21,34 @@ namespace Tmds.Ssh
 
         public ValueTask<bool> CloseAsync() => _client.SendCloseHandleAsync(_handle);
         // Temporary, need to figure out access to the packet sending function if these function will be under SftpFile
-        internal async ValueTask<(int bytesRead, bool eof)> ReadAsync(ulong offset, Memory<byte> buffer, CancellationToken ct)
+        internal ValueTask<(int bytesRead, bool eof)> ReadAsync(ulong offset, Memory<byte> buffer, CancellationToken ct)
+            => _client.ReadAsync(_handle, offset, buffer, ct);
+    }
+
+    public enum SftpOpenFlags
+    {
+        Read = 0x00000001,
+        Write = 0x00000002,
+        Append = 0x00000004,
+        CreateNewOrOpen = 0x00000008,
+        Truncate = 0x00000010,
+        CreateNew = 0x00000020 | CreateNewOrOpen,
+    }
+
+    public partial class SftpClient
+    {
+        internal async ValueTask<(int bytesRead, bool eof)> ReadAsync(byte[] handle, ulong offset, Memory<byte> buffer, CancellationToken ct)
         {
-            using var packet = CreateFileReadMessage(_handle, offset, (UInt32)buffer.Length);
+            using var packet = CreateFileReadMessage(handle, offset, (UInt32)buffer.Length);
             var operation = new ReadFileOperation(buffer);
 
-            await _client.SendRequestAsync(packet.Move(), operation);
+            await SendRequestAsync(packet.Move(), operation);
 
             return await operation.Task;
 
             Packet CreateFileReadMessage(byte[] handle, UInt64 offset, UInt32 len)
             {
-                using var packet = _client._context.RentPacket();
+                using var packet = _context.RentPacket();
                 var writer = packet.GetWriter();
                 writer.Reserve(13); // DataHeaderLength
 
@@ -52,20 +68,6 @@ namespace Tmds.Ssh
                 return packet.Move();
             }
         }
-    }
-
-    public enum SftpOpenFlags
-    {
-        Read = 0x00000001,
-        Write = 0x00000002,
-        Append = 0x00000004,
-        CreateNewOrOpen = 0x00000008,
-        Truncate = 0x00000010,
-        CreateNew = 0x00000020 | CreateNewOrOpen,
-    }
-
-    public partial class SftpClient
-    {
         public async ValueTask DownloadAsync(string filename, string destinationFile, CancellationToken ct)
         {
             SftpFile file = await OpenFileAsync(filename, SftpOpenFlags.Read);

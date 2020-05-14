@@ -54,12 +54,12 @@ namespace Tmds.Ssh
         // SFTP length                   (4)
         const int DataHeaderLength = 13;
         const uint SftpVersion = 3;
-        internal readonly ChannelContext _context;
+        private readonly ChannelContext _context;
         private Task? _receiveLoopTask;
         private int _requestId;
         private readonly ConcurrentDictionary<uint, SftpOperation> _operations;
 
-        internal ValueTask SendRequestAsync(Packet packet, SftpOperation operation)
+        private ValueTask SendRequestAsync(Packet packet, SftpOperation operation)
         {
             /*
                 0: SSH_MSG_CHANNEL_DATA  (1)
