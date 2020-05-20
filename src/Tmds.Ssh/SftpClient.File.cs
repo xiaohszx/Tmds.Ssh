@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Buffers;
 using System.Text;
+using System.IO;
+
 namespace Tmds.Ssh
 {
     public sealed class SftpFile
@@ -78,41 +80,105 @@ namespace Tmds.Ssh
                 return packet.Move();
             }
         }
-        public async ValueTask DownloadAsync(string filename, string destinationFile, CancellationToken ct)
+
+        ValueTask<bool> DownloadPartFull(file, offset, length, destinationFile)
         {
+            bool eof;
+            {
+                (int bytesTransferred, eof) = await DownloadPartPartialAsync(file, offset, BufferLength, destinationFile);
+                offset += bytesTransferred;
+                length -= bytesTransferred;
+            } while (length > 0 && !eof)
+            return eof;
+        }
+
+        public async ValueTask DownloadAsync(string filename, string destinationPath, CancellationToken ct)
+        {
+            const int BufferLength = 32000;
+            const int ConcurrentRequests = 64;
             // just few experiments, don't judge, haha
             SftpFile file = await OpenFileAsync(filename, SftpOpenFlags.Read);
-            /// get file size from the file handle?
 
-            var buffers = new Memory<byte>[bufferCount];
-            for (int i = 0; i < buffers.Length; i++)
-                buffers[i] = new Memory<byte>(new byte[bufferSize]);
+            using var destinationFile = File.OpenWrite(destinationPath);
 
-            var strBuilder = new StringBuilder();
 
-            (int bytesRead, bool eof) readState = (0, false);
-            ulong offset = 0;
-            while (!readState.eof)
+            ValueTask<bool>[] pendingReads;
+
+            bool eof;
+            int offset = 0;
+            do
             {
-                // unrolled the loop, 
-                readState = await file.ReadAsync(offset, buffers[0], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (1 *bufferSize), buffers[1], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (2 *bufferSize), buffers[2], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (3 *bufferSize), buffers[3], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (4 *bufferSize), buffers[4], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (5 *bufferSize), buffers[5], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (6 *bufferSize), buffers[6], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (7 *bufferSize), buffers[7], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (8 *bufferSize), buffers[8], default).ConfigureAwait(false);
-                readState = await file.ReadAsync(offset + (9 *bufferSize), buffers[9], default).ConfigureAwait(false);
+                /*
+                    request 1
+                    await reply 1
 
-                offset += bufferCount * bufferSize;
+                    request 2
+                    await reply 2
+                */
+                await DownloadPartFull(file, offset, BufferLength, destinationFile);
 
-                foreach(var buf in buffers)
-                    strBuilder.Append(Encoding.ASCII.GetString(buf.Span));
-            }
+                /*
+                    request 1 32k
+                    request 2
 
-            Console.WriteLine(strBuilder);
+                    await reply 1 1k
+                    eof = await reply 2
+
+                    request 3
+                    request 4
+
+                    await reply 3
+                    eof = await reply 4
+                */
+                for (int i = 0; i < ConcurrentRequests; i++)
+                {
+                    pendingReads[i] = DownloadPartAsync(file, offset, BufferLength, destinationFile);
+                }
+                for (int i = 0; i < ConcurrentRequests; i++)
+                {
+                    await pendingReads[i];
+                }
+                //  (SftpFile sourceFile, int sourceOffset, int sourceLength, Stream target, int targetOffset)
+                (int bytesTransfered, eof) = await DownloadPartAsync(file, offset, BufferLength, destinationFile);
+                offset += bytesTransfered;
+            } while (!eof);
+
+            await file.CloseAsync();
+
+
+
+
+            // /// get file size from the file handle?
+
+            // var buffers = new Memory<byte>[bufferCount];
+            // for (int i = 0; i < buffers.Length; i++)
+            //     buffers[i] = new Memory<byte>(new byte[bufferSize]);
+
+            // var strBuilder = new StringBuilder();
+
+            // (int bytesRead, bool eof) readState = (0, false);
+            // ulong offset = 0;
+            // while (!readState.eof)
+            // {
+            //     // unrolled the loop, 
+            //     readState = await file.ReadAsync(offset, buffers[0], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (1 *bufferSize), buffers[1], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (2 *bufferSize), buffers[2], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (3 *bufferSize), buffers[3], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (4 *bufferSize), buffers[4], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (5 *bufferSize), buffers[5], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (6 *bufferSize), buffers[6], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (7 *bufferSize), buffers[7], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (8 *bufferSize), buffers[8], default).ConfigureAwait(false);
+            //     readState = await file.ReadAsync(offset + (9 *bufferSize), buffers[9], default).ConfigureAwait(false);
+
+            //     offset += bufferCount * bufferSize;
+
+            //     foreach(var buf in buffers)
+            //         strBuilder.Append(Encoding.ASCII.GetString(buf.Span));
+            // }
+
+            // Console.WriteLine(strBuilder);
         }
 
         // TODO add CancellationToken
@@ -178,6 +244,59 @@ namespace Tmds.Ssh
             }
         }
     }
+
+    sealed class DownloadPartOperation : SftpOperation
+    {
+        ulong _offset;
+        int _length;
+        Stream _destination;
+
+        private TaskCompletionSource<(int bytesRead, bool eof)> _tcs = new TaskCompletionSource<(int bytesRead, bool eof)>();
+
+        internal ReadFileOperation(Memory<byte> buffer)
+        {
+            _buffer = buffer;
+        }
+
+        public override async ValueTask HandleResponse(SftpPacketType type, ReadOnlySequence<byte> fields, SftpClient client)
+        {
+            //      SSH_FXP_DATA
+            //      uint32     id
+            //      string     data
+
+            if (type == SftpPacketType.SSH_FXP_DATA)
+            {
+                var reader = new SequenceReader(fields);
+                ReadOnlySequence<byte> data = reader.ReadStringAsBytes(_buffer.Length);
+                _destination.WriteAsync
+                data.CopyTo(_buffer.Span);
+                _tcs.SetResult(((int)data.Length, false));
+            }
+            // EOF or error
+            else if (type == SftpPacketType.SSH_FXP_STATUS)
+            {
+                (SftpErrorCode errorCode, string? errorMessage) status = ParseStatusFields(fields);
+                if (status.errorCode == SftpErrorCode.SSH_FX_EOF)
+                {
+                    _tcs.SetResult((0, true));
+                }
+                else
+                {
+                    _tcs.SetException(CreateExceptionForStatus(status.errorCode, status.errorMessage));
+                }
+            }
+            else
+            {
+                _tcs.SetException(CreateExceptionForUnexpectedType(type));
+            }
+
+            return default;
+        }
+
+        public Task<(int bytesRead, bool eof)> Task => _tcs.Task;
+    }
+
+
     sealed class ReadFileOperation : SftpOperation
     {
         private TaskCompletionSource<(int bytesRead, bool eof)> _tcs = new TaskCompletionSource<(int bytesRead, bool eof)>();
