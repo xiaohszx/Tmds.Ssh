@@ -24,7 +24,6 @@ namespace Tmds.Ssh
         internal ValueTask<(int bytesRead, bool eof)> ReadAsync(ulong offset, Memory<byte> buffer, CancellationToken ct)
             => _client.ReadAsync(_handle, offset, buffer, ct);
     }
-
     public enum SftpOpenFlags
     {
         Read = 0x00000001,
@@ -37,8 +36,19 @@ namespace Tmds.Ssh
 
     public partial class SftpClient
     {
+        /*
+            All servers SHOULD support packets of at
+            least 34000 bytes (where the packet size refers to the full length,
+            including the header above).  This should allow for reads and writes
+            of at most 32768 bytes.
+        */
+        // larger buffers cause large packet responses and that causes exception in SftpClient.cs packet handle
+        private const int bufferSize = 16000;// 32768;
+        private const int bufferCount = 10;
+
         internal async ValueTask<(int bytesRead, bool eof)> ReadAsync(byte[] handle, ulong offset, Memory<byte> buffer, CancellationToken ct)
         {
+            // This should allow for reads and writes of at most 32768 bytes.
             using var packet = CreateFileReadMessage(handle, offset, (UInt32)buffer.Length);
             var operation = new ReadFileOperation(buffer);
 
@@ -70,18 +80,39 @@ namespace Tmds.Ssh
         }
         public async ValueTask DownloadAsync(string filename, string destinationFile, CancellationToken ct)
         {
+            // just few experiments, don't judge, haha
             SftpFile file = await OpenFileAsync(filename, SftpOpenFlags.Read);
             /// get file size from the file handle?
-            var buffer = new Memory<byte>(new byte[200]);
+
+            var buffers = new Memory<byte>[bufferCount];
+            for (int i = 0; i < buffers.Length; i++)
+                buffers[i] = new Memory<byte>(new byte[bufferSize]);
+
+            var strBuilder = new StringBuilder();
+
             (int bytesRead, bool eof) readState = (0, false);
             ulong offset = 0;
             while (!readState.eof)
             {
-                readState = await file.ReadAsync(offset, buffer, default);
-                offset += (ulong)readState.bytesRead;
+                // unrolled the loop, 
+                readState = await file.ReadAsync(offset, buffers[0], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (1 *bufferSize), buffers[1], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (2 *bufferSize), buffers[2], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (3 *bufferSize), buffers[3], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (4 *bufferSize), buffers[4], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (5 *bufferSize), buffers[5], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (6 *bufferSize), buffers[6], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (7 *bufferSize), buffers[7], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (8 *bufferSize), buffers[8], default).ConfigureAwait(false);
+                readState = await file.ReadAsync(offset + (9 *bufferSize), buffers[9], default).ConfigureAwait(false);
+
+                offset += bufferCount * bufferSize;
+
+                foreach(var buf in buffers)
+                    strBuilder.Append(Encoding.ASCII.GetString(buf.Span));
             }
-            string str = Encoding.ASCII.GetString(buffer.Span);
-            Console.WriteLine(str);
+
+            Console.WriteLine(strBuilder);
         }
 
         // TODO add CancellationToken

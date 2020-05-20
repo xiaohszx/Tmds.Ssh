@@ -83,6 +83,11 @@ namespace Tmds.Ssh
             return _context.SendChannelDataAsync(packet, default(CancellationToken)); // TODO: cancellation
         }
 
+        private ValueTask AppendRequestAsync(Packet packet, SftpOperation operation)
+        {
+           throw new NotImplementedException();
+        }
+
         internal SftpClient(ChannelContext context)
         {
             _context = context;
@@ -171,6 +176,7 @@ namespace Tmds.Ssh
             uint length = reader.ReadUInt32();
             type = reader.ReadSftpPacketType();
             requestId = reader.ReadUInt32();
+            // bug, argument out of range for big packets?
             fields = payload.AsReadOnlySequence().Slice(9, length - 5);
             consumed = 4 + length;
             return true;
